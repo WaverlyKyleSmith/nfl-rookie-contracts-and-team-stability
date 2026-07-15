@@ -27,8 +27,7 @@ Two data sources feed this analysis (see [`data/README.md`](data/README.md) for 
 - **Model**: OLS with team-clustered standard errors, cross-checked against Huber M-estimation (robust regression) on an identical specification, both with team and season fixed effects.
 - **Diagnostics**: residuals vs. fitted, Cook's distance, Durbin-Watson/ACF for autocorrelation
 
-See [analysis/nfl_rookie_contracts_and_team_stability.Rmd](analysis/nfl_rookie_contracts_and_team_stability.Rmd) for the full model specification and inline discussion, or [the PDF report](reports/nfl_rookie_contracts_and_team_stability_report.pdf) for the knitted write-up. Findings are also presented in PowerPoint format [here](reports/nfl_rookie_contracts_and_team_stability_presentation.pdf).
-
+See [analysis/nfl_rookie_contracts_and_team_stability.Rmd](analysis/nfl_rookie_contracts_and_team_stability.Rmd) for the full model specification and inline discussion, or [the PDF report](reports/nfl_rookie_contracts_and_team_stability_report.pdf) for the knitted write-up. Findings are also presented in PowerPoint format [here](reports/nfl_rookie_contracts_team_stability_presentation.pdf).
 ## License
 
 See [`LICENSE`](LICENSE).
