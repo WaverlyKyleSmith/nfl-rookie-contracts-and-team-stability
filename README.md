@@ -15,7 +15,7 @@ Two data sources feed this analysis (see [`data/README.md`](data/README.md) for 
 | File | Included? | Used for | Source |
 |---|---|---|---|
 |`team_epas.csv`| ✅ | Season-by-season team EPA/play (Case Studies) | `nflfastR`|
-|`SAL384FinalProjectData.csv`| ❌ (schmema documented)| Main modeling dataset (146 team-seasons, 2011-2015 base years) | `nflfastR` + Spotrac (contract/cap data) |
+|`SAL384FinalProjectData.csv`| ❌ (schema documented)| Main modeling dataset (146 team-seasons, 2011-2015 base years) | `nflfastR` + Spotrac (contract/cap data) |
 
 - Play-by-play / EPA data: [`nflfastR`](https://www.nflfastr.com/)
 - Contract and cap data: [SpoTrac](https://www.spotrac.com/)
