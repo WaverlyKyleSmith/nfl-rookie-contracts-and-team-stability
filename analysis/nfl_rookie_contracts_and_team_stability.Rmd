@@ -32,7 +32,7 @@ Base years in this study are from 2011-2015 for all teams (meaning data spans un
 ## Case Studies
 
 ```{r, echo = FALSE, fig.height=2.5}
-team_epas <- read_csv("~/Desktop/School/FA25/SAL384/FinalProj/team_epas.csv")
+team_epas <- read_csv("team_epas.csv")
 lar_data <- team_epas %>%
   filter(team == "LAR", season >= 2011, season <= 2024) %>%
   arrange(season)
@@ -100,7 +100,7 @@ Though not measured in the study for aforementioned reasons, CLE (2018-2022) app
 ## 1. Data and Initial Look
 
 ```{r, include = FALSE}
-data <- read_csv("~/Desktop/School/FA25/SAL384/FinalProj/SAL384FinalProjectData.csv")
+data <- read_csv("SAL384FinalProjectData.csv")
 glimpse(data)
 ```
 
