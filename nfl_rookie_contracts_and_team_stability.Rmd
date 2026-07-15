@@ -1,0 +1,478 @@
+---
+title: "Rookie Contract Allocations and Team Stability in the NFL"
+author: |
+  | Kyle Smith
+  | \small Syracuse University
+date: "2025"
+output: 
+  pdf_document:
+      fig_crop: true
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse); library(car); library(sandwich); library(lmtest); library(MASS)
+```
+
+In 2011, the NFLPA adjusted the CBA to include a rookie wage scale, determining rookie contracts by draft position before they are drafted. In theory, cheapther standardized rookie contracts might affect the short-term volatility of team performance by:
+
+1. Enabling rapid offensive rebuilds around inexpensive rookie quarterbacks.
+
+2. Encouraging teams to reset faster after failures.
+
+3. Allowing teams to allocate disproportionate resources to other units.
+
+This study aims to test any meaningful difference in the volatility of team performance in NFL offenses.
+
+**Volatility** in this study is defined as the 4-year forward-looking standard deviation of EPA/play. This study is *not* capturing team success over those four-years (the length of a rookie contract), but instead the consistency of offensive performance over that time frame. Essentially, over the course of the rookie player's contract, does his monetary value impact the team's trajectory?
+
+Base years in this study are from 2011-2015 for all teams (meaning data spans until 2019 in the latest rolling window). 2020 was shown to be an arbitrary year in offensive EPA/play league-wide due to a variety of factors in the COVID season. Including it in any later window would attribute unnatural volatility to teams and affect results.
+ 
+ \newpage
+ 
+## Case Studies
+
+```{r, echo = FALSE, fig.height=2.5}
+team_epas <- read_csv("~/Desktop/School/FA25/SAL384/FinalProj/team_epas.csv")
+lar_data <- team_epas %>%
+  filter(team == "LAR", season >= 2011, season <= 2024) %>%
+  arrange(season)
+
+lar_highlight <- lar_data %>%
+  filter(season >= 2015, season <= 2019)
+
+ggplot(lar_data, aes(x = season, y = epa_per_play)) +
+  geom_line() +
+  geom_point() +
+  geom_line(data = lar_highlight, color = "red", linewidth = 1.2, linetype = "dashed") +
+  geom_point(data = lar_highlight, color = "red") +
+  scale_x_continuous(breaks = lar_data$season) +
+  coord_cartesian(ylim = c(-0.20, 0.20)) +
+  labs(title = "St. Louis/Los Angeles Rams EPA/Play by Season",
+       x = "Season", y = "EPA/Play") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "#f0f0f0", color = NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed", color = "grey70"),
+    axis.text.x = element_text(angle = 90, vjust = 0.5)
+  )
+  
+```
+
+Within the studied windows, the Rams (2015-2019) have the highest offensive volatility in the National Football League. In 2015, the Los Angeles Rams drafted RB Todd Gurley (OROY, OPOY, 3x Pro Bowl, 3x All-Pro). They followed that pick up the following year with the drafting of their then-franchise QB, Jared Goff (2x Pro Bowl as a Ram). Following the drafting of these two high-level offensive pieces, they experienced a very large increase in offensive efficiency. The inference can therefore be made that the investment in offensive players through the draft may play a role on changing how an offense succeeds.
+
+\vspace{0.3in}
+
+```{r, echo = FALSE, fig.height = 2.5}
+cle_data <- team_epas %>%
+  filter(team == "CLE", season >= 2011, season <= 2024) %>%
+  arrange(season)
+
+cle_highlight <- cle_data %>%
+  filter(season >= 2011, season <= 2017)
+
+ggplot(cle_data, aes(x = season, y = epa_per_play)) +
+  geom_line() +
+  geom_point() +
+  geom_line(data = cle_highlight, color = "red", linewidth = 1.2, linetype = "dashed") +
+  geom_point(data = cle_highlight, color = "red") +
+  scale_x_continuous(breaks = cle_data$season) +
+  coord_cartesian(ylim = c(-0.20, 0.20)) +
+  labs(title = "Cleveland Browns EPA per Play by Season",
+       x = "Season", y = "EPA/Play") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "#f0f0f0", color = NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed", color = "grey70"),
+    axis.text.x = element_text(angle = 90, vjust = 0.5)
+  )
+```
+
+The lowest offensive volatilities in the sample are two separate, overlapping windows by the Cleveland Browns (2011-2015 & 2013-2017). The inference from the Rams chart isn't present here. The team's only offensive draftee of note over this time frame was G Joel Bitonio in 2014. Although he became a franchise cornerstone and 2-time All Pro, on an otherwise mediocre offensive line, his impact wouldn't have been able to be properly realized, emphasized in the teams consistent subpar offense. 
+
+Though not measured in the study for aforementioned reasons, CLE (2018-2022) appears to experience a higher level of both offense and volatility. In 2017 and 2018, the team drafted TE David Njoku (3rd in All-Time CLE receptions, 12th in receiving yards) and Baker Mayfield (2nd in OROY voting to Saquon Barkley). Both first round picks (meaning higher contract values per the rookie wage scale) appear to have affected the volatility of the offense over the course of that window whereas the lack of early-round offensive picks in the years prior corresponded with stagnation.
+
+\newpage
+
+## 1. Data and Initial Look
+
+```{r, include = FALSE}
+data <- read_csv("~/Desktop/School/FA25/SAL384/FinalProj/SAL384FinalProjectData.csv")
+glimpse(data)
+```
+
+Volatility as the outcome is estimated in this study via:
+
+- **Continuity**
+  - *QBC* (Quarterback Continuity): whether or not the Primary Quarterback (the player with the most dropbacks recorded on the season) is the same between season *s* and season *s-1*.
+  - *HCC* (Head Coach Continuity): whether or not the Head Coach who coached the most games in season *s* is the same as the HC in season *s-1*.
+  - *OCC* (Offensive Coordinator Continuity): whether or not the Offensive Coordinator who called the most games in season *s* is the same as the OC in season *s-1*.
+  
+- **Team Characteristics**
+  - *Age* [`avg_off_age`]: The average age of offensive starters.
+  - *QBE* [`qb_exp`] (Quarterback Experience): The amount of seasons the Primary Quarterback has played in. Seasons are rounded down, a rookie has 0 years of experience.
+  
+- **Front Office Decisions**
+  - *DC* [`off_dc`] (Draft Capital): A metric measuring the value of the picks utilized in a draft on offensive players (exclusively through player selection). The value of one pick is calculated as `1/(pick_drafted)`. The sum of these independent variables is a teams Draft Capital value for that season.
+  - *RS* [`rookie_prop`] (Rookie Share): The proportion of cap space spent that is allocated to overall rookie players. Teams with more picks would end up spending more on rookies than a team with a few high level picks, justifying this metric as a separate entity than DC (noting that higher draft picks make more money per the CBA).
+  - *OS* [`offense_prop`] (Offensive Share): The proportion of cap space spent that is allocated to all offensive players.
+
+*Team and Season Fixed Effects are also included.*
+
+The data used for this study were collected utilizing `nflfastR` and contract information from SpoTrac. Below are the summary statistics for the variables used.
+
+```{r, echo = FALSE}
+library(kableExtra)
+
+vars <- c("qbc", "hcc", "occ", "avg_off_age", "qb_exp", "off_dc", "rookie_prop", "offense_prop")
+
+stats_all <- data %>%
+  dplyr::select(all_of(vars)) %>%
+  summarise(across(everything(), list(
+    Min = ~min(.x, na.rm = TRUE),
+    `1st Qu.` = ~quantile(.x, 0.25, na.rm = TRUE),
+    Median = ~median(.x, na.rm = TRUE),
+    Mean = ~mean(.x, na.rm = TRUE),
+    `3rd Qu.` = ~quantile(.x, 0.75, na.rm = TRUE),
+    Max = ~max(.x, na.rm = TRUE)
+  ))) %>%
+  pivot_longer(everything(), names_to = c("variable", ".value"), names_sep = "_(?=[^_]+$)")
+
+stats_all[1:4, ] %>%
+  kable(digits = 3, booktabs = TRUE, align = "c") %>%
+  kable_styling(latex_options = "hold_position", font_size = 10)
+stats_all[5:8, ] %>%
+  kable(digits = 3, booktabs = TRUE, align = "c") %>%
+  kable_styling(latex_options = "hold_position", font_size = 10)
+```
+
+\newpage
+
+## 2. Exploratory Data Analysis
+
+```{r, fig.height=3, fig.width = 6, echo = FALSE}
+cont_vars <- c("epa_volatility_4yr", "off_dc", "avg_off_age", "qb_exp", "rookie_prop", "offense_prop")
+
+data %>%
+  dplyr::select(all_of(cont_vars)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, fill = "steelblue", alpha = 0.7) +
+  geom_density(color = "black") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal()
+```
+
+Visualized as bar charts, the variables show relatively expected patterns. Of note, `off_dc`'s skew is very apparent. Some teams with only a few picks invest the majority in offense, skewing the variable. For the most part otherwise, teams spend a blend of their draft capital on both offense and defense with earlier picks favoring offensive players. `qb_exp` expectedly widdles down as it moves toward more Quarterbacks with more longevity, naturally sparse.
+
+
+```{r, echo = FALSE}
+data %>%
+  dplyr::select(all_of(cont_vars), qbc, hcc, occ) %>%
+  cor(use = "complete.obs") %>%
+  as.data.frame() %>%
+  rownames_to_column("variable") %>%
+  dplyr::select(variable, epa_volatility_4yr) %>%
+  arrange(desc(epa_volatility_4yr)) %>%
+  kable(digits = 3) %>%
+  kable_styling(latex_options = c("scale_down", "hold_position"),
+                font_size = 10)
+```
+
+Presented are each variable's correlation coefficient in relation to the rolling-window volatility. Head coach continuity allocation shows the strongest raw correlation with volatility (r = 0.142), followed by rookie cap allocation (r = -0.118) and QB experience (r = 0.079). All bivariate correlations are weak in magnitude individually, justifying the use of nonlinear and interaction terms utilized in the model specification presented in section 3. A simple correlation coefficient only captures straight-line relationships, so a variable can show a weak correlation here and still turn out to matter significantly once a quadratic term is included in the full model.
+
+\newpage
+
+```{r, include = FALSE}
+z_vars <- c("off_dc", "avg_off_age", "qb_exp", "rookie_prop", "offense_prop")
+centers <- sapply(data[z_vars], mean, na.rm = T)
+scales <- sapply(data[z_vars], sd, na.rm = T)
+
+data_z <- data
+for (v in z_vars) {
+  data_z[[paste0(v, "_z")]] <- (data_z[[v]] - centers[v]) / scales[v]
+}
+for (v in z_vars) {
+  data_z[[paste0(v, "_z_sq")]] <- data_z[[paste0(v, "_z")]]^2
+}
+```
+
+## 3. Design Matrix
+
+Variables were standardized to deal with potential multicollinearity that exists with the introduction of squared and interaction terms. The `_z` suffix annotates this variable transformation.
+
+The model specification is below.
+
+```{r, echo = TRUE}
+model <- lm(
+  epa_volatility_4yr ~ 
+    qbc + hcc + occ + 
+    off_dc_z + off_dc_z_sq +
+    avg_off_age_z + avg_off_age_z_sq + 
+    qb_exp_z + qb_exp_z_sq +
+    rookie_prop_z + rookie_prop_z_sq + 
+    offense_prop_z + offense_prop_z_sq + 
+    I(rookie_prop_z * offense_prop_z) +
+    I(rookie_prop_z * off_dc_z) +
+    factor(season) + factor(team), 
+  data = data_z
+  )
+```
+
+**Interaction Justification**
+
+1. `rookie_prop_z` x `off_dc_z`
+
+Rookie cap share on its own only demonstrates how much of the budget is tied up in unproven players, but it says nothing about who those rookies are. A team could have a high rookie cap share made up of late-round, low-investment picks, or a high rookie cap share concentrated in premium first-round selections. These are drastically different situations. 
+
+This interaction lets the model ask: does investing heavily in rookies generally affect stability differently depending on whether that investment is concentrated in a premium pick versus spread across lower-cost, lower certainty players?
+
+2. `rookie_prop_z` x `offense_prop_z`
+
+This tests whether a heavy rookie presence matters differently depending on how much of the team's overall cap commitment sits on offense in the first place.
+  - High rookie share + *high offense cap share*, the offense itself is a major organizational priority, and a large chunk of that priority investment rides on unproven players; a more concentrated, higher-variance bet on youth.
+  - High rookie share + *low offense cap share*, the offense isn't where the team's resources are concentrated, so a high rookie share there may just reflect organizational neglect or a rebuilding phase, not an intentional structural bet.
+  
+This interaction lets the volatility relationship reflect that context rather than treating "rookie share" as if it means the same thing regardless of surrounding investment.
+
+\newpage
+
+## 4. Multicollinearity Check
+
+```{r, include = FALSE}
+model_explicit <- lm(
+  epa_volatility_4yr ~ qbc + hcc + occ + 
+    off_dc_z + I(off_dc_z^2) +
+    avg_off_age_z + I(avg_off_age_z^2) + 
+    qb_exp_z + I(qb_exp_z^2) +
+    rookie_prop_z + I(rookie_prop_z^2) + 
+    offense_prop_z + I(offense_prop_z^2) + 
+    I(rookie_prop_z * offense_prop_z) +
+    I(rookie_prop_z * off_dc_z) +
+    factor(season) + factor(team), 
+  data = data_z
+  )
+
+model_formula <- epa_volatility_4yr ~ qbc + hcc + occ + 
+    off_dc_z + I(off_dc_z^2) +
+    avg_off_age_z + I(avg_off_age_z^2) + 
+    qb_exp_z + I(qb_exp_z^2) +
+    rookie_prop_z + I(rookie_prop_z^2) + 
+    offense_prop_z + I(offense_prop_z^2) + 
+    I(rookie_prop_z * offense_prop_z) +
+    I(rookie_prop_z * off_dc_z) +
+    factor(season) + factor(team)
+```
+
+```{r, echo = FALSE}
+vif(model_explicit, type = "predictor")[1:3] %>%
+  kable(digits = 3, booktabs = T, align = "c") %>%
+  kable_styling(latex_options = c("scale_down", "hold_position"),
+                font_size = 20)
+```
+\newpage
+
+## 5a. Model Fitting: OLS (Cluster-Robust) vs. Robust Regression
+
+Two estimators are fit on the identical specification: ordinary least squares with team clustered errors and Huber M-estimation, a robust regression method that automatically downweights high-residual observations during fitting rather than letting them dominate the estimated coeffficients. Team and season fixed effects absorb stable differences across franchises and years, so that the remaining coefficients reflect within-team, within-season variation in roster construction rather than differences that are really jsut about which team or year is being observed. Clustering the standard errors by team guards against any remiaining within-team correlation in the residuals across seasons that the fixed effects alone do not fully absorb. OLS, however, remains sensitive to a small number of high-level team-seasons (the draft capital skew noted in Section 2 is a likely source of any such influence) which is why the Huber M-estimation model is fit on the same specification alongside it. Because both models share the same fixed effects and predictors, any difference between them reflects only how each handles outlier influence and residual dependence, not a difference in what is being controlled for. Where the two estimators converge on a roster-construction variable's sign and significance, that agreement is meaningful evidence that the finding is not the artifact of a small number of extreme team-seasons; where they disagree, the robust model's estimate is generally more trustworthy for that term, since it is fit specifically to limit the influence of the kind of high-leverage observations that could otherwise drive a spurious OLS result.
+
+OLS output presented on the next page.
+
+
+```{r, echo = FALSE, results = 'asis'}
+library(stargazer)
+
+stargazer(model, type = "latex", title = "OLS Model Output (Default Standard Errors)",
+          omit = c("factor\\(team\\)", "factor\\(season\\)"),
+          add.lines = list(c("Team Fixed Effects", "28 Significant relative to ARI"),
+                            c("Season Fixed Effects", "Insignificant relative to 2015")),
+          float.env = "table*",
+          font.size = "small")
+```
+
+\clearpage
+
+Huber M-estimation model output presented below.
+
+```{r, echo = FALSE}
+rlm_model <- rlm(model_formula, data = data_z, psi = psi.huber)
+
+rlm_summary <- summary(rlm_model)
+rlm_coefs <- as.data.frame(rlm_summary$coefficients)
+rlm_df <- length(rlm_model$residuals) - length(coef(rlm_model))
+rlm_coefs$p_value <- 2 * pt(-abs(rlm_coefs$`t value`), df = rlm_df)
+rlm_coefs$significance <- symnum(rlm_coefs$p_value,
+                                 corr = F, na = F,
+                                 cutpoints = c(0, 0.001, 0.01, 0.05, 0.15, 1),
+                                 symbols = c("***", "**", "*", ".", " "))
+rlm_coefs$significance <- as.character(rlm_coefs$significance)
+rownames(rlm_coefs)[rownames(rlm_coefs) == "(Intercept)"] <- "Intercept"
+
+rlm_coefs[!grepl("factor\\(team\\)|factor\\(season\\)", rownames(rlm_coefs)), ] %>%
+  dplyr::select(-significance) %>%
+  kable(digits = 3, booktabs = T, align = "c") %>%
+  kable_styling(latex_options = "hold_position") %>%
+  footnote(general = c("28 Team Fixed Effects Significant relative to ARI",
+                        "Season Fixed Effects Insignificant relative to 2015"),
+           general_title = "Note:")
+```
+\newpage
+
+## 5b. Discussion
+
+Presented is a comparison table, showing both outputs side by side. Anywhere there are sign and significance agreements across models indicates genuine strong findings that are not a consequence of either specification.
+
+```{r, echo = FALSE}
+ols_summary <- summary(model)$coefficients
+
+comparison <- data.frame(
+  variable = names(coef(model)),
+  ols_coef = round(coef(model), 4),
+  ols_pval = round(ols_summary[, "Pr(>|t|)"], 4),
+  rlm_coef = round(coef(rlm_model), 4),
+  rlm_pval = round(rlm_coefs$p_value, 4)
+)
+
+
+comparison$sign_agreement <- sign(comparison$ols_coef) == sign(comparison$rlm_coef)
+comparison$significance_agreement <- case_when(
+  comparison$ols_pval <= 0.1 & comparison$rlm_pval <= 0.15 ~ "Significant",
+  comparison$ols_pval >= 0.1 & comparison$rlm_pval >= 0.15 ~ "Insignificant",
+  TRUE ~ "Disagreement"
+)
+comparison$variable[comparison$variable == "(Intercept)"] <- "Intercept"
+
+comparison[!grepl("factor\\(team\\)|factor\\(season\\)", comparison$variable), ] %>%
+  dplyr::select(-ols_pval, -rlm_pval) %>%
+  kable(digits = 3, booktabs = TRUE, align = c("l", "r", "r", "r", "r"), row.names = FALSE) %>%
+  kable_styling(latex_options = c("scale_down", "hold_position"),
+                font_size = 12)
+```
+
+Across the full set of roster construction variables, the two estimators agree in the direction of every effect, and the large majority also agree on which terms are meaningfully associated with offensive volatility. A handful of terms warrant closer interpretation individually.
+
+`rookie_prop_z_sq` reaches significance under the robust specification but not under OLS. This pattern is worth reading differently than a case where OLS finds significance RLM does not: since the robust model is specifically designed to reduce the influence of atypical team-seasons, its ability to detect a relationship that the unweighted OLS fit could not suggests that noise from a small number of outlying observations may have been obscuring a genuine curved relationship. `rookie_prop_z` is not significant under either estimator. The relationship between rookie investment and offensive stability is more likely to be curved than straightforwardly directional. There is a concave relationship between the two, meaning teams on both the low and high extremes of rookie share appear to be more stable than teams closer to league average, where volatility is highest. There's a happy medium at some point in the arc where a team needing a spark may want to be, demonstrated visually in Section 5c.
+
+`hcc` is significant and positive across both models. Teams switching head coaches are most likely doing so as a result of mediocrity, and outside of a select few special cases, coaches aren't able to immediately cause their roster to drastically differ from the season before. On the other end, maintaining a coach year-over-year allows for a coach to plant roots and implement roster-specific decisions that introduce offensive changes both positive and negative. 
+
+Offensive cap share shows a robust curved relationship with volatility, confirmed by both estimators on the squared term. The linear term is significant under the robust specification but not under OLS, suggesting the curve may be slightly asymmetric rather than a perfectly even concave relationship. This is also presented in Section 5c.
+
+\newpage 
+
+The interaction between rookie cap share and draft capital shows diverging estimators once again. OLS suggests a positive and marginally significant relationship that the RLM doesn't support to the same degree. Substantively, this interaction was included to test whether a large rookie cap commitment means something different depending on how premium the underlying draft investment is: a big rookie share built on a first-round talent versus one build on cheaper, lower-pedigree players. The OLS result, taken at face value, would suggest that concentrating rookie spending in a high-capital, high-profile pick is associated with more volatility rather than less, since a single premium rookie at QB, for example, introduces more year-to-year unpredictability than a roster built on depth across many lower-cost young players. Because the robust model does not confirm this relationship with the same strength, however, this interaction should be treated as suggestive rather than established. It is a reasonable hypothesis worth raising: betting big on one high-pedigree rookie is a higher-variance strategy than spreading rookie investment more thinly.
+
+The general significance of team fixed effects would indicate that there still remain several team-dependent factors that exist outside of resource allocation that lead to offensive stability or lack thereof. The general insignificance of the same in season fixed-effects would indicate there is no systematic difference in allocation usage to affect volatility.
+
+\newpage
+
+## 5c. Visualizations
+
+```{r, include = FALSE, fig.height = 3, fig.width = 6}
+plot_quadratic_effect <- function(model, var_z, var_z_sq, center_value, scale_value,
+                                   raw_range, xlab, pct = FALSE) {
+  b0 <- coef(model)["(Intercept)"]
+  b1 <- coef(model)[var_z]
+  b2 <- coef(model)[var_z_sq]
+
+  z_range <- (raw_range - center_value) / scale_value
+  predicted <- b0 + b1 * z_range + b2 * z_range^2
+
+  vertex_z   <- -b1 / (2 * b2)
+  vertex_raw <- vertex_z * scale_value + center_value
+  vertex_y   <- b0 + b1 * vertex_z + b2 * vertex_z^2
+
+  point_type <- if (b2 > 0) "Minimum" else "Maximum"
+
+  x_display      <- if (pct) raw_range * 100 else raw_range
+  vertex_display <- if (pct) vertex_raw * 100 else vertex_raw
+  label <- if (pct) sprintf("%s: %.1f%%", point_type, vertex_display) else
+                     sprintf("%s: %.1f", point_type, vertex_display)
+
+  p <- ggplot(data.frame(x = x_display, y = predicted), aes(x = x, y = y)) +
+    geom_line() +
+    geom_point(data = data.frame(x = vertex_display, y = vertex_y), aes(x = x, y = y),
+               color = "red", size = 3) +
+    annotate("text", x = vertex_display, y = vertex_y, label = label, 
+             vjust = ifelse(point_type == "Maximum", 2, -1), color = "red") +
+    labs(x = xlab, y = "EPA Volatility") +
+    theme_minimal()
+  print(p)
+  invisible(vertex_raw)
+}
+```
+
+**QB Experience vs Predicted Volatility**
+```{r, echo = FALSE, fig.height = 1.5, fig.width = 6, fig.align = "center"}
+qb_exp_range <- seq(min(data$qb_exp), max(data$qb_exp), length.out = 100)
+plot_quadratic_effect(rlm_model, "qb_exp_z", "I(qb_exp_z^2)",
+                       centers["qb_exp"], scales["qb_exp"],
+                       qb_exp_range, "QB Experience (years)")
+
+```
+
+Teams appear to be most volatile at the 6.5 season mark. Players beyond this point are either established franchise options or established career backups, both of which would logically change the trajectory of the team. Following the arc like a career path, a rookie gaining experience in the league begins to affect the trajectory of their team (either positively or negatively) until the inflection point. After which, players either drop out of starting roles/the league or become longevity plays where teams tend to not differ much on offense from consistent high-level play (i.e., an Aaron Rodgers/Tom Brady type).
+
+**Rookie Cap Share vs Predicted Volatility**
+```{r, echo = FALSE, fig.height =1.5, fig.width = 6, fig.align = "center"}
+rookie_range <- seq(min(data$rookie_prop), max(data$rookie_prop), length.out = 100)
+plot_quadratic_effect(rlm_model, "rookie_prop_z", "I(rookie_prop_z^2)",
+                       centers["rookie_prop"], scales["rookie_prop"],
+                       rookie_range, "Rookie Cap Share (%)", pct = TRUE)
+```
+
+Teams appear to be more stable when they differ from the 5% league average. Teams investing heavily in unproven players may not realize enough offensive change to affect volatility over the course of their first contract. The same can be said from teams that don't invest in rookies.
+
+**Offensive Cap Share vs Predicted Volatility**
+```{r, echo = FALSE, fig.height = 1.5, fig.width = 6, fig.align = "center"}
+offense_range <- seq(min(data$offense_prop), max(data$offense_prop), length.out = 100)
+plot_quadratic_effect(rlm_model, "offense_prop_z", "I(offense_prop_z^2)",
+                       centers["offense_prop"], scales["offense_prop"],
+                       offense_range, "Offensive Cap Share (%)", pct = TRUE)
+```
+
+Intuition ties this chart to offensive success. Teams that invest nothing in their offense can almost guarantee consistently poor offenses. Teams that invest very heavily in their offense can hope for more consistent high-level play. With the highest paid positions generally on offense, a >42% investment in the offense is likely indicative of having two high level receivers, linemen, a top QB, or any combination, all of which would theoretically provide more consistent offense. Inconsistencies come between 30% and 50%, showing that a general defensive focus logically detracts from offensive stability.
+
+\newpage
+
+## 6. Diagnostics
+
+\vspace{0.3in}
+
+```{r, echo = FALSE, fig.height = 3}
+ggplot(data.frame(fitted = model$fitted.values, resid = model$residuals),
+       aes(x = fitted, y = resid)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+```
+
+Residuals appear scattered evenly above and below zero across the range of fitted values, without a funnel shape or other symmetrical pattern that would indicate heteroskedasticity.
+
+\vspace{0.3in}
+
+```{r, echo = FALSE, fig.height = 3}
+cooks_d <- cooks.distance(model)
+threshold <- 4 / length(cooks_d)
+
+ggplot(data.frame(index = seq_along(cooks_d), cooks_d = cooks_d), aes(x = index, y = cooks_d)) +
+  geom_segment(aes(xend = index, yend = 0)) +
+  geom_hline(yintercept = threshold, color = "red", linetype = "dashed") +
+  labs(title = "Cook's Distance (OLS)", x = "Observation Index", y = "Cook's Distance") +
+  theme_minimal()
+```
+
+The flagged team-seasons cluster around big QB transitions rather than appearing as scattered, unexplainable noise. Denver appears in three consecutive windows starting in 2011, 2012, and 2013, spanning the shift from a low-experience starter in Tim Tebow to a Hall of Famer in Peyton Manning who would break the record for both passing yards and touchdowns in a single season in 2013. In 2015, Manning played only ten gemaes in his retirement season, qualifying as the team's Primary Quarterback, yet providing subpar play that lowered offensive efficiency drastically from where it was two seasons prior. Big outliers are evident of similar transitions and justify the use of the RLM.
+
+\newpage
+
+```{r, echo = FALSE, fig.height = 3}
+acf(rlm_model$residuals, main = "ACF of RLM Residuals")
+dw_stat <- sum(diff(rlm_model$residuals)^2) / sum(rlm_model$residuals^2)
+cat("DW: ", round(dw_stat, 3))
+```
+
+The ACF plot supports the Durbin-Watson result: aside from the trivial spike at lag 0, every other lag falls within the dashed confidence bounds, with the exception of lag 7 which just barely passes the lower bound. Combined with a 2.05 DW statistic, there is reasonable evidence against meaningful autocorrelation in the residuals at both short and longer lags, despite the panel structure repeated team observations across seasons.
